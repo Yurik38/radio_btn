@@ -1,0 +1,8 @@
+*.dep
+*.ewd
+*.ewp
+*.aps
+*.aws
+/Debug
+/settings
+/Release
