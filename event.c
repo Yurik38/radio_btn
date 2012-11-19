@@ -13,11 +13,6 @@ T_EVENT*	rd_event_ptr;
 T_EVENT		EventList[NUM_EVENT];
 T_EVENT		tmp_ev;
 
-//uchar tx_buf[PACKET_SIZE];
-//uchar tx_buf[16];
-
-//void CheckRxBuf(void);
-
 void InitEventList(void)
 {
 	wr_event_ptr = EventList;
@@ -50,41 +45,3 @@ T_EVENT* GetCurEventAddr(void)
 	if (rd_event_ptr != wr_event_ptr) return rd_event_ptr;
 	else return NULL;
 }
-
-/************************************************************************/
-/*void CheckRxBuf(void)
-{
-	static uchar rx_state = 0;
-	static uchar rx_crc = 0;
-	static uchar rx_cnt;
-	static uchar *p_rx;
-	uchar tmp;
-
-
-	if (!(GetByte(&tmp))) return;
-
-	switch(rx_state)
-	{
-		case 0:
-			if (tmp == 0x7E)			//начало пакета
-			{
-				rx_state = 1;
-				rx_crc = 0;
-				rx_cnt = sizeof(T_EVENT);
-				p_rx = (uchar*)&tmp_ev;
-			}
-			break;
-		case 1:
-			*p_rx = tmp;
-			p_rx++;
-			rx_crc += tmp;
-			if (--rx_cnt) break;
-			rx_state = 2;
-			break;
-		case 2:
-			if (rx_crc == tmp) PostEvent(&tmp_ev, 0);		//правильный пакет, генерим собитие но не шлем
-		default:
-			rx_state = 0;
-			break;*
-	}
-}*/

@@ -17,8 +17,8 @@ Fuses
 */
 
 #include "cpu.h"
-#include "UART.h"
 #include "event.h"
+#include "UART.h"
 
 /* Код команды в кнопку */
 #define		START_ROUND	0x01
@@ -36,7 +36,7 @@ Fuses
 #define		NUM_PACKET	0x11
 #define		VOLTAGE		0x12
 
-#define		TX_BUF_SIZE	16
+//#define		TX_BUF_SIZE	16
 #define		RED		6
 #define		GREEN		5
 #define		SND		7
@@ -46,8 +46,8 @@ Fuses
 
 #define		_mS10		~(13824 - 1)  //прескаллер 8
 
-#define		_LedOn(p)	PORTD &= ~(1 << p)
-#define		_LedOff(p)	PORTD |= (1 << p)
+/*#define		_LedOn(p)	PORTD &= ~(1 << p)
+#define		_LedOff(p)	PORTD |= (1 << p)*/
 #define		_SndOn		PORTD_Bit7 = 0;
 #define		_SndOff		PORTD_Bit7 = 1;
 
@@ -97,17 +97,7 @@ __flash FUNC FuncTbl[] = {
   BatVolt,
   Sound,
   ReadyTimeOut
-};
-
-
-typedef struct 
-{
-  uchar		cmd;
-  uint		param0;
-  uchar		id;
-  uchar		crc;
-}TPACKET;
-    
+};    
 
 uchar volatile	Flags;			//Флаги
 uint 		Result;
@@ -116,14 +106,12 @@ uint		VoltageSum;
 uchar		Voltage;
 uchar volatile	Second;
 uchar volatile	SndTime;
-uchar volatile	LedTmr;
+uchar volatile	Delay1;			//variable for UART delay
 uchar volatile	Ring;
 uchar volatile	UnsensTmr;
 uchar		CurID;
 uchar		CntRxPacket;
 uchar		CntTxPacket;
-uchar		TxBuf[TX_BUF_SIZE];
-TPACKET		TxPacket;
 
 /************************************************************************/
 /*	П Р Е Р Ы В А Н И Я						*/
@@ -135,11 +123,6 @@ __interrupt  void TIMER1_OVF_interrupt(void)
 //  uchar i;
   TCNT1 += _mS10;
   Result++;			//результат всегда инкрементируется.
-  if (_CheckF(TOUR_GO_1))
-  {
-;
-  }
-
   //Обрабатываем клавиатуру
   if ((PIND_Bit2) && (UnsensTmr))
     if (UnsensTmr == 1)
@@ -148,9 +131,9 @@ __interrupt  void TIMER1_OVF_interrupt(void)
       GICR |= 1 << INT0;		//ext interrupt enable
       UnsensTmr = 0;
     }
-   else UnsensTmr--;
+  else UnsensTmr--;
   
-
+  if(Delay1) --Delay1;
   //обработка звука
   if (SndTime) SndTime--;
   else if (Ring)
@@ -161,10 +144,10 @@ __interrupt  void TIMER1_OVF_interrupt(void)
     Ring--;
   }
   else {_SndOff;}
-  if (LedTmr)
+  if (LedTime[0])
   {
-    if (LedTmr == 1) {_LedOff(RED); LedTmr = 0;}
-    else LedTmr--;
+    if (LedTime[0] == 1) {_LedOff(RED); LedTime[0] = 0;}
+    else LedTime[0]--;
   }
   if (Second) Second--;
   else 
@@ -265,19 +248,13 @@ void Cancel(uchar a)
 /************************************************************************/
 void NumPacket(uchar a)
 {
-  TxPacket.cmd = NUM_PACKET;
-  TxPacket.param0 = CntRxPacket;
-  TxPacket.id++;
-  _SetF(PACKET_READY);
+  PostEvent(NUM_PACKET, CntRxPacket, MAIN_DEV);
 }
 
 /************************************************************************/
 void BatVolt(uchar a)
 {
-  TxPacket.cmd = VOLTAGE;
-  TxPacket.param0 = Voltage;
-  TxPacket.id++;
-  _SetF(PACKET_READY);
+  PostEvent(VOLTAGE, Voltage, MAIN_DEV);
 }
 
 /************************************************************************/
@@ -304,131 +281,32 @@ void ReadyTimeOut(uchar a)
 
 
 /************************************************************************/
-/*BYTE STUFF!!!!!!
-Output:
-  Byte in frame has value 0x7E is changed into 2 bytes: 0x7D 0x5E
-  Byte in frame has value 0x7D is changed into 2 bytes: 0x7D 0x5D
-Input:
-  When byte 0x7D is received, discard this byte, and the next byte is XORed with 0x20
-*/
-uchar PrepareTxBuffer(TPACKET* packet, uchar* buf)
-{
-  uchar i, crc;
-  uchar ret;
-  uchar* p_tmp;
-  
-  p_tmp = (uchar*)packet;
-  *buf = 0x7E;
-  buf++;
-  crc = 0;
-  ret = 1;
-  for (i = 0; i < 4; i++)
-  {
-    if (p_tmp[i] == 0x7E) 
-    {
-      *buf = 0x7D;
-      buf++;
-      *buf = 0x5E;
-      buf++;
-      ret +=2;
-    }
-    else if (p_tmp[i] == 0x7D) 
-    {
-      *buf = 0x7D;
-      buf++;
-      *buf = 0x5D;
-      buf++;
-      ret +=2;
-    }
-    else 
-    {
-      *buf = p_tmp[i];
-      buf++;
-      ret++;
-    }
-    crc += p_tmp[i];
-  }
-  *buf = crc;
-  ret++;
-  return ret;
-}
-
-/************************************************************************/
 /*		M A I N 						*/
 /************************************************************************/
 
 void main(void)
 {
-  uchar crc, cnt;
+/*  uchar crc, cnt;
   uchar rx_byte, tx_cnt;
   uchar parse_state;
+  uchar buf[sizeof(TPACKET)];*/
   uint	tmp2;
-  uchar buf[sizeof(TPACKET)];
-  TPACKET* packet;
+  T_EVENT *p_event;
+  
+  
   
   InitCPU();
   InitTimers();
   InitUART(1152);
-  InitADC();
+  InitEventList();
+//  InitADC();
 //  _UART_RX_EN;
   _SEI();
 
   SndOnShort();
   _LedOn(GREEN);
-  parse_state = 0;
-  packet = (TPACKET*)buf;
-
-  while (1)
+  while(1)
   {
-    if (GetByte(&rx_byte))
-    {
-      switch (parse_state)
-      {
-      case 0:
-        if (rx_byte == 0x7E)		  //начало пакета
-        {
-          parse_state = 1;
-          crc = 0;
-          cnt = 0;
-          LedTmr = 5;
-          _LedOn(RED);
-        }
-        break;
-        
-      case 1:  
-        if (rx_byte == 0x7D) parse_state = 2;
-        else
-        {
-          buf[cnt] = rx_byte;
-          crc += rx_byte;
-          if (cnt >= 3) parse_state = 3;
-          else cnt++;
-        }
-        break;
-        
-      case 2:
-        rx_byte ^= 0x20;
-        buf[cnt] = rx_byte;
-        crc += rx_byte;
-        if (cnt >= 3) parse_state = 3;
-        else {cnt++; parse_state = 1;}
-        break;
-        
-      case 3:
-        parse_state = 0;
-        if (crc != rx_byte) break;		
-        if (CurID == packet->id) break; 		
-        CurID = packet->id;
-        CntRxPacket++;
-        LedTmr = 50;
-        if (packet->cmd < CMD_NUM) FuncTbl[packet->cmd](packet->param0);
-        break;
-      
-      default: 
-        parse_state = 0;
-        break;
-      }
-    }
     if (_CheckF(PRESS_KEY))
     {
       _ClrF(PRESS_KEY);
@@ -442,20 +320,26 @@ void main(void)
         SendResult = 0;
         _SEI();
       }
-        
-      TxPacket.cmd = TIME_STAMP;
-      TxPacket.param0 = SendResult;
-      TxPacket.id++;
-      _SetF(PACKET_READY);
-    }
-    if (_CheckF(PACKET_READY))
+      PostEvent(TIME_STAMP, SendResult, MAIN_DEV);
+  }
+    p_event = GetPacket();
+	if (p_event != NULL)
+	  PostEvent(p_event->cmd, p_event->param0, p_event->addr);
+
+    
+	p_event = GetEvent();
+    if (p_event != NULL)
     {
-      _ClrF(PACKET_READY);
-      tx_cnt = PrepareTxBuffer(&TxPacket, TxBuf);
-      _LedOn(RED);
-      LedTmr = 50;
-      TxBuffer(TxBuf, tx_cnt);
-      CntTxPacket++;
+      if (p_event->addr == MAIN_DEV)
+      {
+        //if event for main device - send it and mark as handled
+        SendPacket(p_event);
+      }
+      else 
+      {
+        if (p_event->cmd < CMD_NUM) FuncTbl[p_event->cmd](p_event->param0);
+      }
+      p_event = NULL;
     }
     if (_CheckF(SECOND))
     {
