@@ -14,7 +14,7 @@
 #define		_UART_TX_EN	UCSRB |= (1 << TXEN)
 #define		_UART_TX_DIS	UCSRB &= ~(1 << TXEN)
 
-#ifdef MAIN_DEV
+#ifdef _MAIN
 #define NUM_CS			4
 #define	LEDPORT			PORTC
 #else
